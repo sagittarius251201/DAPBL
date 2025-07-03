@@ -40,7 +40,8 @@ url = st.sidebar.text_input("Data URL", DEFAULT_URL)
 upload = st.sidebar.file_uploader("Or upload CSV", type=["csv"])
 
 @st.cache_data
- def load_data(url, upload_file):
+def load_data(url, upload_file):
+    """Load dataset from URL or uploaded file."""
     try:
         if upload_file is not None:
             return pd.read_csv(upload_file)
@@ -49,15 +50,16 @@ upload = st.sidebar.file_uploader("Or upload CSV", type=["csv"])
         st.error(f"Data load error: {e}")
         return pd.DataFrame()
 
-# Load
- df = load_data(url, upload)
+# Load Data
+df = load_data(url, upload)
 if df.empty:
+    st.error("❗ No data loaded. Please check your URL or upload a CSV.")
     st.stop()
 
-# Show shape
+# Show data shape
 st.sidebar.markdown(f"**Data shape:** {df.shape}")
 
-# Convert spend column
+# Clean spend column
 if 'WillingnessToSpend' in df.columns:
     df['WillingnessToSpend'] = (
         df['WillingnessToSpend'].astype(str)
@@ -68,32 +70,32 @@ if 'WillingnessToSpend' in df.columns:
 # -- Data Visualization --
 if tab == "Data Visualization":
     st.header("Descriptive Insights")
-    # Age
-    if 'Age' in df:
+    # Age distribution
+    if 'Age' in df.columns:
         fig, ax = plt.subplots()
         df['Age'].value_counts().sort_index().plot.bar(ax=ax)
         ax.set_title("Age Distribution")
         st.pyplot(fig)
-    # Income
-    if 'Monthly_Income' in df:
+    # Income brackets
+    if 'Monthly_Income' in df.columns:
         fig, ax = plt.subplots()
         df['Monthly_Income'].value_counts().plot.bar(ax=ax)
         ax.set_title("Income Brackets")
         st.pyplot(fig)
-    # Consumption freq
-    if 'HealthDrinkFreq' in df:
+    # Consumption frequency
+    if 'HealthDrinkFreq' in df.columns:
         fig, ax = plt.subplots()
         df['HealthDrinkFreq'].value_counts().plot.bar(ax=ax)
         ax.set_title("Consumption Frequency")
         st.pyplot(fig)
-    # Likelihood to try
-    if 'LikelihoodTryNewBrand' in df:
+    # Likelihood to try new brand
+    if 'LikelihoodTryNewBrand' in df.columns:
         fig, ax = plt.subplots()
         df['LikelihoodTryNewBrand'].value_counts().plot.bar(ax=ax)
         ax.set_title("Likelihood to Try New Brand")
         st.pyplot(fig)
-    # Flavor prefs
-    if 'FlavorPreferences' in df:
+    # Flavor preferences
+    if 'FlavorPreferences' in df.columns:
         prefs = df['FlavorPreferences'].str.get_dummies(sep=';').sum().sort_values(ascending=False)
         st.table(prefs.to_frame('Count'))
 
@@ -104,12 +106,12 @@ elif tab == "Classification":
     if target not in df.columns:
         st.error(f"Missing target: {target}")
         st.stop()
-    sub = df[df[target].isin(['Yes','No'])]
-    y = sub[target].map({'Yes':1,'No':0})
+    sub = df[df[target].isin(['Yes', 'No'])]
+    y = sub[target].map({'Yes': 1, 'No': 0})
     X = sub.select_dtypes(include=[np.number]).dropna()
     y = y.loc[X.index]
     if X.empty:
-        st.error("No numeric features.")
+        st.error("No numeric features available.")
         st.stop()
     try:
         Xt, Xv, yt, yv = train_test_split(X, y, stratify=y, test_size=0.3, random_state=42)
@@ -122,55 +124,66 @@ elif tab == "Classification":
         'RF': RandomForestClassifier(),
         'GB': GradientBoostingClassifier()
     }
-    rows = []
-    for n,m in models.items():
-        m.fit(Xt, yt)
-        p = m.predict(Xv)
-        rows.append({
-            'Model': n,
-            'Acc': accuracy_score(yv,p),
-            'Prec': precision_score(yv,p),
-            'Rec': recall_score(yv,p),
-            'F1': f1_score(yv,p)
+    results = []
+    for name, model in models.items():
+        model.fit(Xt, yt)
+        pred = model.predict(Xv)
+        results.append({
+            'Model': name,
+            'Accuracy': accuracy_score(yv, pred),
+            'Precision': precision_score(yv, pred),
+            'Recall': recall_score(yv, pred),
+            'F1-Score': f1_score(yv, pred)
         })
-    st.table(pd.DataFrame(rows))
-    sel = st.selectbox("Confusion matrix:", list(models.keys()))
+    st.table(pd.DataFrame(results))
+    sel = st.selectbox("Confusion Matrix", list(models.keys()))
     cm = confusion_matrix(yv, models[sel].predict(Xv))
     fig, ax = plt.subplots()
     ax.imshow(cm, cmap='Blues')
-    for (i,j),z in np.ndenumerate(cm): ax.text(j,i,z,ha='center')
+    for (i, j), z in np.ndenumerate(cm):
+        ax.text(j, i, z, ha='center')
     st.pyplot(fig)
-    # ROC
+    # ROC Curve
     fig, ax = plt.subplots()
-    for n,m in models.items():
-        prob = m.predict_proba(Xv)[:,1]
-        fpr,tpr,_ = roc_curve(yv,prob)
-        ax.plot(fpr,tpr,label=n)
-    ax.plot([0,1],[0,1],'k--'); ax.legend(); st.pyplot(fig)
+    for name, model in models.items():
+        prob = model.predict_proba(Xv)[:, 1]
+        fpr, tpr, _ = roc_curve(yv, prob)
+        ax.plot(fpr, tpr, label=name)
+    ax.plot([0, 1], [0, 1], 'k--')
+    ax.set_xlabel('FPR')
+    ax.set_ylabel('TPR')
+    ax.set_title('ROC Curve')
+    ax.legend()
+    st.pyplot(fig)
 
 # -- Clustering --
 elif tab == "Clustering":
     st.header("K-Means Clustering")
     nums = df.select_dtypes(include=[np.number]).dropna(axis=1)
-    k = st.slider("Clusters k",2,10,3)
-    inertia = [KMeans(n_clusters=i,random_state=42).fit(nums).inertia_ for i in range(1,11)]
+    if nums.empty:
+        st.error("No numeric data for clustering.")
+        st.stop()
+    k = st.slider("Clusters k", 2, 10, 3)
+    inertias = [KMeans(n_clusters=i, random_state=42).fit(nums).inertia_ for i in range(1, 11)]
     fig, ax = plt.subplots()
-    ax.plot(range(1,11), inertia, 'o-'); st.pyplot(fig)
+    ax.plot(range(1, 11), inertias, 'o-')
+    ax.set_title('Elbow Method')
+    st.pyplot(fig)
     km = KMeans(n_clusters=k, random_state=42).fit(nums)
     df['cluster'] = km.labels_
     st.dataframe(df.groupby('cluster').mean())
-    st.download_button("Download clusters", df.to_csv(index=False),"clusters.csv")
+    st.download_button("Download Clustered Data", df.to_csv(index=False), "clustered_data.csv", "text/csv")
 
-# -- Association Rules --
+# -- Association Rule Mining --
 elif tab == "Association Rule Mining":
-    st.header("Association Mining")
-    obj = st.multiselect("Cols:", df.select_dtypes(include=['object']).columns.tolist())
-    s = st.slider("Min sup",0.01,0.5,0.05)
-    c = st.slider("Min conf",0.1,1.0,0.5)
-    if st.button("Run"):
-        df_bin = df[obj].apply(lambda x: x.str.get_dummies(sep=';'))
-        freq = apriori(df_bin, min_support=s, use_colnames=True)
-        rules = association_rules(freq, metric='confidence', min_threshold=c)
+    st.header("Association Rule Mining")
+    cols = st.multiselect("Select categorical columns", df.select_dtypes(include=['object']).columns)
+    min_sup = st.slider("Min support", 0.01, 0.5, 0.05)
+    min_conf = st.slider("Min confidence", 0.1, 1.0, 0.5)
+    if st.button("Run Apriori"):
+        df_bin = df[cols].apply(lambda x: x.str.get_dummies(sep=';'))
+        freq = apriori(df_bin, min_support=min_sup, use_colnames=True)
+        rules = association_rules(freq, metric='confidence', min_threshold=min_conf)
         st.write(rules.head(10))
 
 # -- Regression --
@@ -182,11 +195,23 @@ elif tab == "Regression":
         st.stop()
     y = df[tgt].dropna()
     X = df.select_dtypes(include=[np.number]).drop(columns=[tgt], errors='ignore').loc[y.index]
+    if X.empty:
+        st.error("No features for regression.")
+        st.stop()
     Xt, Xv, yt, yv = train_test_split(X, y, test_size=0.3, random_state=42)
-    regs = {'Lin':LinearRegression(), 'Ridge':Ridge(), 'Lasso':Lasso(), 'Tree':DecisionTreeRegressor()}
-    out=[]
-    for n,m in regs.items():
-        m.fit(Xt, yt)
-        pr = m.predict(Xv)
-        out.append({'Model':n, 'RMSE':np.sqrt(mean_squared_error(yv,pr)), 'R2':r2_score(yv,pr)})
+    regs = {
+        'Linear': LinearRegression(),
+        'Ridge': Ridge(),
+        'Lasso': Lasso(),
+        'Tree': DecisionTreeRegressor()
+    }
+    out = []
+    for name, model in regs.items():
+        model.fit(Xt, yt)
+        preds = model.predict(Xv)
+        out.append({
+            'Model': name,
+            'RMSE': np.sqrt(mean_squared_error(yv, preds)),
+            'R2': r2_score(yv, preds)
+        })
     st.table(pd.DataFrame(out))
